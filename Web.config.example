@@ -2,10 +2,19 @@
 <configuration>
   <appSettings>
     <!-- bKash Credentials -->
+    <!-- PASSWORD এ special characters থাকলে এনকোড করুন:
+         < = &lt;
+         > = &gt;
+         & = &amp;
+         " = &quot;
+         ' = &apos;
+    -->
     <add key="bKashAppKey" value="YOUR_APP_KEY" />
     <add key="bKashAppSecret" value="YOUR_APP_SECRET" />
     <add key="bKashUsername" value="YOUR_USERNAME" />
-    <add key="bKashPassword" value="YOUR_PASSWORD" />
+    <add key="bKashPassword" value="YOUR_PASSWORD_HERE" />
+    
+    <!-- Example: যদি password হয় "Pass&lt;123&gt;word" তাহলে লিখুন "Pass&lt;123&gt;word" -->
     
     <!-- bKash API Configuration -->
     <!-- Sandbox: https://tokenized.sandbox.bka.sh -->
