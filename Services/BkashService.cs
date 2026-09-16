@@ -10,7 +10,7 @@ using Newtonsoft.Json.Linq;
 namespace bKashPayment.Services
 {
     /// <summary>
-    /// bKash API সেবা ক্লাস
+    /// bKash API v2 সেবা ক্লাস
     /// </summary>
     public class BkashService
     {
@@ -39,12 +39,10 @@ namespace bKashPayment.Services
             // Enable TLS 1.2 (required for modern APIs)
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
             
-            // SSL certificate validation (Development-এর জন্য)
+            // SSL certificate validation
             ServicePointManager.ServerCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) =>
             {
                 LogDebug("SSL Certificate Validation Called. Errors: " + sslPolicyErrors.ToString());
-                // Development-এ সব certificate accept করুন
-                // Production-এ এটি remove করুন
                 return true;
             };
 
@@ -66,7 +64,7 @@ namespace bKashPayment.Services
         {
             System.Diagnostics.Debug.WriteLine("[BkashService] " + message);
             
-            // File logging-ও যোগ করুন (optional)
+            // File logging-ও যোগ করুন
             try
             {
                 string logPath = AppDomain.CurrentDomain.BaseDirectory + "Logs";
@@ -83,11 +81,11 @@ namespace bKashPayment.Services
         }
 
         /// <summary>
-        /// bKash থেকে Access Token পান
+        /// bKash থেকে Access Token পান (v2 API)
         /// </summary>
         public async Task<string> GetAccessTokenAsync()
         {
-            LogDebug("=== GetAccessTokenAsync Started ===");
+            LogDebug("=== GetAccessTokenAsync Started (v2 API) ===");
             
             try
             {
@@ -97,16 +95,15 @@ namespace bKashPayment.Services
                     throw new Exception("bKash configuration missing. Check Web.config AppSettings.");
                 }
 
+                // v2 API endpoint - গ্রাহক token শুধুমাত্র AppKey এবং AppSecret দিয়ে পাওয়া যায়
                 var credentials = new
                 {
                     app_key = _appKey,
-                    app_secret = _appSecret,
-                    username = _username,
-                    password = _password
+                    app_secret = _appSecret
                 };
 
                 string credentialsJson = JsonConvert.SerializeObject(credentials);
-                LogDebug("Credentials JSON: " + credentialsJson);
+                LogDebug("Request Payload: " + credentialsJson);
 
                 var content = new StringContent(
                     credentialsJson,
@@ -114,12 +111,12 @@ namespace bKashPayment.Services
                     "application/json"
                 );
 
-                // Build URL
-                string url = (_baseUrl ?? "").TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/token/grant";
+                // Build URL for v2 API
+                string url = (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/token/grant";
                 LogDebug("Token URL: " + url);
                 LogDebug("Making POST request to bKash...");
 
-                // Make request with detailed error handling
+                // Make request
                 HttpResponseMessage response = null;
                 try
                 {
@@ -164,13 +161,19 @@ namespace bKashPayment.Services
                     throw;
                 }
 
-                // Check status code
-                if (result.statusCode != "0000")
+                // Check if token received
+                if (result.statusCode != null && result.statusCode.ToString() != "0000")
                 {
                     throw new Exception("bKash returned error: " + result.statusMessage);
                 }
 
-                string token = result.id_token;
+                string token = result.id_token ?? result.accessToken;
+                if (string.IsNullOrEmpty(token))
+                {
+                    LogDebug("Response JSON: " + responseString);
+                    throw new Exception("No token in response. Check API response format.");
+                }
+
                 LogDebug("Token received successfully: " + (token.Length > 10 ? token.Substring(0, 10) + "..." : token));
                 LogDebug("=== GetAccessTokenAsync Completed Successfully ===");
                 
@@ -202,7 +205,7 @@ namespace bKashPayment.Services
         }
 
         /// <summary>
-        /// নতুন Agreement তৈরি করুন
+        /// নতুন Agreement তৈরি করুন (v2 API)
         /// </summary>
         public async Task<string> CreateAgreementAsync(string accessToken, string payerReference, string callbackUrl)
         {
@@ -213,7 +216,7 @@ namespace bKashPayment.Services
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, 
-                    (_baseUrl ?? "").TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/create");
+                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/create");
                 
                 request.Headers.Add("Authorization", accessToken);
                 request.Headers.Add("X-APP-Key", _appKey);
@@ -225,8 +228,11 @@ namespace bKashPayment.Services
                     callbackURL = callbackUrl
                 };
 
+                string requestJson = JsonConvert.SerializeObject(agreementRequest);
+                LogDebug("Agreement Request: " + requestJson);
+
                 request.Content = new StringContent(
-                    JsonConvert.SerializeObject(agreementRequest),
+                    requestJson,
                     Encoding.UTF8,
                     "application/json"
                 );
@@ -253,7 +259,7 @@ namespace bKashPayment.Services
         }
 
         /// <summary>
-        /// টোকেনাইজড পেমেন্ট তৈরি করুন
+        /// টোকেনাইজড পেমেন্ট তৈরি করুন (v2 API)
         /// </summary>
         public async Task<string> CreateTokenizedPaymentAsync(string accessToken, string agreementId, decimal amount)
         {
@@ -264,7 +270,7 @@ namespace bKashPayment.Services
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, 
-                    (_baseUrl ?? "").TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/payment/create");
+                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/payment/create");
                 
                 request.Headers.Add("Authorization", accessToken);
                 request.Headers.Add("X-APP-Key", _appKey);
@@ -278,8 +284,11 @@ namespace bKashPayment.Services
                     merchantInvoiceNumber = GenerateInvoiceNumber()
                 };
 
+                string requestJson = JsonConvert.SerializeObject(paymentRequest);
+                LogDebug("Payment Request: " + requestJson);
+
                 request.Content = new StringContent(
-                    JsonConvert.SerializeObject(paymentRequest),
+                    requestJson,
                     Encoding.UTF8,
                     "application/json"
                 );
@@ -306,7 +315,7 @@ namespace bKashPayment.Services
         }
 
         /// <summary>
-        /// পেমেন্ট এক্সিকিউট করুন
+        /// পেমেন্ট এক্সিকিউট করুন (v2 API)
         /// </summary>
         public async Task<JObject> ExecuteTokenizedPaymentAsync(string accessToken, string paymentId)
         {
@@ -316,14 +325,17 @@ namespace bKashPayment.Services
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, 
-                    (_baseUrl ?? "").TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/payment/execute");
+                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/payment/execute");
                 
                 request.Headers.Add("Authorization", accessToken);
                 request.Headers.Add("X-APP-Key", _appKey);
 
                 var payload = new { paymentID = paymentId };
+                string requestJson = JsonConvert.SerializeObject(payload);
+                LogDebug("Execute Payment Request: " + requestJson);
+
                 request.Content = new StringContent(
-                    JsonConvert.SerializeObject(payload),
+                    requestJson,
                     Encoding.UTF8,
                     "application/json"
                 );
@@ -342,7 +354,7 @@ namespace bKashPayment.Services
         }
 
         /// <summary>
-        /// পেমেন্ট স্ট্যাটাস চেক করুন
+        /// পেমেন্ট স্ট্যাটাস চেক করুন (v2 API)
         /// </summary>
         public async Task<JObject> QueryPaymentAsync(string accessToken, string paymentId)
         {
@@ -352,14 +364,17 @@ namespace bKashPayment.Services
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, 
-                    (_baseUrl ?? "").TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/payment/query");
+                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/payment/query");
                 
                 request.Headers.Add("Authorization", accessToken);
                 request.Headers.Add("X-APP-Key", _appKey);
 
                 var payload = new { paymentID = paymentId };
+                string requestJson = JsonConvert.SerializeObject(payload);
+                LogDebug("Query Payment Request: " + requestJson);
+
                 request.Content = new StringContent(
-                    JsonConvert.SerializeObject(payload),
+                    requestJson,
                     Encoding.UTF8,
                     "application/json"
                 );
