@@ -165,10 +165,10 @@ namespace bKashPayment.Services
                 }
 
                 // Parse JSON
-                dynamic result = null;
+                JObject result = null;
                 try
                 {
-                    result = JsonConvert.DeserializeObject(responseString);
+                    result = JObject.Parse(responseString);
                     LogDebug("Parsed JSON successfully");
                 }
                 catch (Exception pexc)
@@ -178,19 +178,21 @@ namespace bKashPayment.Services
                 }
 
                 // Check response status
-                if (result.statusCode != null && result.statusCode.ToString() != "0000")
+                JToken statusCodeToken = result["statusCode"];
+                if (statusCodeToken != null && statusCodeToken.ToString() != "0000")
                 {
-                    throw new Exception("bKash returned error: " + result.statusMessage);
+                    throw new Exception("bKash returned error: " + result["statusMessage"]);
                 }
 
                 // Extract token - could be id_token or accessToken
-                string token = result.id_token ?? result.accessToken;
-                if (string.IsNullOrEmpty(token))
+                JToken tokenValue = result["id_token"] ?? result["accessToken"];
+                if (tokenValue == null)
                 {
-                    LogDebug("Response JSON Keys: " + string.Join(", ", result.Properties.Select(p => p.Name)));
+                    LogDebug("Response JSON Keys: " + string.Join(", ", result.Properties().Select(p => p.Name)));
                     throw new Exception("No token in response. Check API response format.");
                 }
 
+                string token = tokenValue.ToString();
                 LogDebug("Token received successfully: " + (token.Length > 10 ? token.Substring(0, 10) + "..." : token));
                 LogDebug("=== GetAccessTokenAsync Completed Successfully ===");
                 
@@ -258,15 +260,15 @@ namespace bKashPayment.Services
                 var responseString = await response.Content.ReadAsStringAsync();
                 LogDebug("Agreement Response: " + responseString);
                 
-                dynamic result = JsonConvert.DeserializeObject(responseString);
+                JObject result = JObject.Parse(responseString);
 
-                if (result.statusCode == "0000")
+                if (result["statusCode"].ToString() == "0000")
                 {
                     LogDebug("Agreement created successfully");
-                    return result.bkashURL;
+                    return result["bkashURL"].ToString();
                 }
 
-                throw new Exception("Agreement Creation Error: " + result.statusMessage);
+                throw new Exception("Agreement Creation Error: " + result["statusMessage"]);
             }
             catch (Exception ex)
             {
@@ -314,15 +316,15 @@ namespace bKashPayment.Services
                 var responseString = await response.Content.ReadAsStringAsync();
                 LogDebug("Payment Create Response: " + responseString);
                 
-                dynamic result = JsonConvert.DeserializeObject(responseString);
+                JObject result = JObject.Parse(responseString);
 
-                if (result.statusCode == "0000")
+                if (result["statusCode"].ToString() == "0000")
                 {
                     LogDebug("Payment created successfully");
-                    return result.paymentID;
+                    return result["paymentID"].ToString();
                 }
 
-                throw new Exception("Payment Creation Error: " + result.statusMessage);
+                throw new Exception("Payment Creation Error: " + result["statusMessage"]);
             }
             catch (Exception ex)
             {
