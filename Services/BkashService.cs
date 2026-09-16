@@ -1,5 +1,6 @@
 using System;
 using System.Configuration;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -27,7 +28,17 @@ namespace bKashPayment.Services
             _username = ConfigurationManager.AppSettings["bKashUsername"];
             _password = ConfigurationManager.AppSettings["bKashPassword"];
             _baseUrl = ConfigurationManager.AppSettings["bKashBaseUrl"];
-            _httpClient = new HttpClient();
+
+            // HttpClient কে properly configure করুন
+            var handler = new HttpClientHandler();
+            
+            // SSL certificate validation (Development-এর জন্য)
+            // Production-এ এটি remove করুন বা proper certificate ব্যবহার করুন
+            ServicePointManager.ServerCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true;
+            
+            // HttpClient singleton instance তৈরি করুন
+            _httpClient = new HttpClient(handler);
+            _httpClient.Timeout = TimeSpan.FromSeconds(30); // 30 সেকেন্ড timeout
         }
 
         /// <summary>
@@ -51,14 +62,19 @@ namespace bKashPayment.Services
                     "application/json"
                 );
 
-                var response = await _httpClient.PostAsync(
-                    $"{_baseUrl}/v1.2.0-beta/tokenized/checkout/token/grant",
-                    content
-                );
+                // URL সঠিক format-এ তৈরি করুন
+                string url = _baseUrl.TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/token/grant";
+                
+                // Debug: Log the URL
+                System.Diagnostics.Debug.WriteLine("[BkashService] Requesting token from: " + url);
+
+                var response = await _httpClient.PostAsync(url, content);
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    throw new Exception($"bKash Token API Error: {response.StatusCode}");
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    System.Diagnostics.Debug.WriteLine("[BkashService] Token API Error: " + response.StatusCode + " - " + errorContent);
+                    throw new Exception("bKash Token API Error: " + response.StatusCode + " - " + errorContent);
                 }
 
                 var responseString = await response.Content.ReadAsStringAsync();
@@ -66,14 +82,26 @@ namespace bKashPayment.Services
 
                 if (result.statusCode == "0000")
                 {
+                    System.Diagnostics.Debug.WriteLine("[BkashService] Token retrieved successfully");
                     return result.id_token;
                 }
 
-                throw new Exception($"bKash Token Error: {result.statusMessage}");
+                throw new Exception("bKash Token Error: " + result.statusMessage);
+            }
+            catch (HttpRequestException ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[BkashService] Network error: " + ex.Message);
+                throw new Exception("Network error while getting bKash Access Token: " + ex.Message, ex);
+            }
+            catch (TaskCanceledException ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[BkashService] Request timeout: " + ex.Message);
+                throw new Exception("Request timeout while getting bKash Access Token. Check your internet connection.", ex);
             }
             catch (Exception ex)
             {
-                throw new Exception($"Failed to get bKash Access Token: {ex.Message}", ex);
+                System.Diagnostics.Debug.WriteLine("[BkashService] Failed to get token: " + ex.Message);
+                throw new Exception("Failed to get bKash Access Token: " + ex.Message, ex);
             }
         }
 
@@ -84,9 +112,11 @@ namespace bKashPayment.Services
         {
             try
             {
-                var client = new HttpClient();
-                client.DefaultRequestHeaders.Add("Authorization", accessToken);
-                client.DefaultRequestHeaders.Add("X-APP-Key", _appKey);
+                var request = new HttpRequestMessage(HttpMethod.Post, 
+                    _baseUrl.TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/create");
+                
+                request.Headers.Add("Authorization", accessToken);
+                request.Headers.Add("X-APP-Key", _appKey);
 
                 var agreementRequest = new
                 {
@@ -95,17 +125,13 @@ namespace bKashPayment.Services
                     callbackURL = callbackUrl
                 };
 
-                var content = new StringContent(
+                request.Content = new StringContent(
                     JsonConvert.SerializeObject(agreementRequest),
                     Encoding.UTF8,
                     "application/json"
                 );
 
-                var response = await client.PostAsync(
-                    $"{_baseUrl}/v1.2.0-beta/tokenized/checkout/create",
-                    content
-                );
-
+                var response = await _httpClient.SendAsync(request);
                 var responseString = await response.Content.ReadAsStringAsync();
                 dynamic result = JsonConvert.DeserializeObject(responseString);
 
@@ -114,11 +140,11 @@ namespace bKashPayment.Services
                     return result.bkashURL;
                 }
 
-                throw new Exception($"Agreement Creation Error: {result.statusMessage}");
+                throw new Exception("Agreement Creation Error: " + result.statusMessage);
             }
             catch (Exception ex)
             {
-                throw new Exception($"Failed to create Agreement: {ex.Message}", ex);
+                throw new Exception("Failed to create Agreement: " + ex.Message, ex);
             }
         }
 
@@ -129,9 +155,11 @@ namespace bKashPayment.Services
         {
             try
             {
-                var client = new HttpClient();
-                client.DefaultRequestHeaders.Add("Authorization", accessToken);
-                client.DefaultRequestHeaders.Add("X-APP-Key", _appKey);
+                var request = new HttpRequestMessage(HttpMethod.Post, 
+                    _baseUrl.TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/payment/create");
+                
+                request.Headers.Add("Authorization", accessToken);
+                request.Headers.Add("X-APP-Key", _appKey);
 
                 var paymentRequest = new
                 {
@@ -142,17 +170,13 @@ namespace bKashPayment.Services
                     merchantInvoiceNumber = GenerateInvoiceNumber()
                 };
 
-                var content = new StringContent(
+                request.Content = new StringContent(
                     JsonConvert.SerializeObject(paymentRequest),
                     Encoding.UTF8,
                     "application/json"
                 );
 
-                var response = await client.PostAsync(
-                    $"{_baseUrl}/v1.2.0-beta/tokenized/checkout/payment/create",
-                    content
-                );
-
+                var response = await _httpClient.SendAsync(request);
                 var responseString = await response.Content.ReadAsStringAsync();
                 dynamic result = JsonConvert.DeserializeObject(responseString);
 
@@ -161,11 +185,11 @@ namespace bKashPayment.Services
                     return result.paymentID;
                 }
 
-                throw new Exception($"Payment Creation Error: {result.statusMessage}");
+                throw new Exception("Payment Creation Error: " + result.statusMessage);
             }
             catch (Exception ex)
             {
-                throw new Exception($"Failed to create Tokenized Payment: {ex.Message}", ex);
+                throw new Exception("Failed to create Tokenized Payment: " + ex.Message, ex);
             }
         }
 
@@ -176,28 +200,26 @@ namespace bKashPayment.Services
         {
             try
             {
-                var client = new HttpClient();
-                client.DefaultRequestHeaders.Add("Authorization", accessToken);
-                client.DefaultRequestHeaders.Add("X-APP-Key", _appKey);
+                var request = new HttpRequestMessage(HttpMethod.Post, 
+                    _baseUrl.TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/payment/execute");
+                
+                request.Headers.Add("Authorization", accessToken);
+                request.Headers.Add("X-APP-Key", _appKey);
 
                 var payload = new { paymentID = paymentId };
-                var content = new StringContent(
+                request.Content = new StringContent(
                     JsonConvert.SerializeObject(payload),
                     Encoding.UTF8,
                     "application/json"
                 );
 
-                var response = await client.PostAsync(
-                    $"{_baseUrl}/v1.2.0-beta/tokenized/checkout/payment/execute",
-                    content
-                );
-
+                var response = await _httpClient.SendAsync(request);
                 var responseString = await response.Content.ReadAsStringAsync();
                 return JObject.Parse(responseString);
             }
             catch (Exception ex)
             {
-                throw new Exception($"Failed to execute Tokenized Payment: {ex.Message}", ex);
+                throw new Exception("Failed to execute Tokenized Payment: " + ex.Message, ex);
             }
         }
 
@@ -208,28 +230,26 @@ namespace bKashPayment.Services
         {
             try
             {
-                var client = new HttpClient();
-                client.DefaultRequestHeaders.Add("Authorization", accessToken);
-                client.DefaultRequestHeaders.Add("X-APP-Key", _appKey);
+                var request = new HttpRequestMessage(HttpMethod.Post, 
+                    _baseUrl.TrimEnd('/') + "/v1.2.0-beta/tokenized/checkout/payment/query");
+                
+                request.Headers.Add("Authorization", accessToken);
+                request.Headers.Add("X-APP-Key", _appKey);
 
                 var payload = new { paymentID = paymentId };
-                var content = new StringContent(
+                request.Content = new StringContent(
                     JsonConvert.SerializeObject(payload),
                     Encoding.UTF8,
                     "application/json"
                 );
 
-                var response = await client.PostAsync(
-                    $"{_baseUrl}/v1.2.0-beta/tokenized/checkout/payment/query",
-                    content
-                );
-
+                var response = await _httpClient.SendAsync(request);
                 var responseString = await response.Content.ReadAsStringAsync();
                 return JObject.Parse(responseString);
             }
             catch (Exception ex)
             {
-                throw new Exception($"Failed to query Payment: {ex.Message}", ex);
+                throw new Exception("Failed to query Payment: " + ex.Message, ex);
             }
         }
 
