@@ -81,7 +81,7 @@ namespace bKashPayment.Services
         }
 
         /// <summary>
-        /// bKash থেকে Access Token পান (v2 API)
+        /// bKash থেকে Access Token পান (v2 API - সঠিক endpoint)
         /// </summary>
         public async Task<string> GetAccessTokenAsync()
         {
@@ -95,32 +95,48 @@ namespace bKashPayment.Services
                     throw new Exception("bKash configuration missing. Check Web.config AppSettings.");
                 }
 
-                // v2 API endpoint - গ্রাহক token শুধুমাত্র AppKey এবং AppSecret দিয়ে পাওয়া যায়
-                var credentials = new
+                if (string.IsNullOrEmpty(_username) || string.IsNullOrEmpty(_password))
+                {
+                    throw new Exception("bKash username/password missing. Check Web.config AppSettings.");
+                }
+
+                // v2 API - Correct endpoint from bKash documentation
+                string url = (_baseUrl ?? "").TrimEnd('/') + "/tokenized-checkout/auth/grant-token";
+                LogDebug("Token URL: " + url);
+
+                // Create request with proper headers
+                var request = new HttpRequestMessage(HttpMethod.Post, url);
+                
+                // Add Headers
+                request.Headers.Add("Accept", "application/json");
+                request.Headers.Add("username", _username);
+                request.Headers.Add("password", _password);
+
+                // Request Body with app_key and app_secret
+                var tokenRequest = new
                 {
                     app_key = _appKey,
                     app_secret = _appSecret
                 };
 
-                string credentialsJson = JsonConvert.SerializeObject(credentials);
-                LogDebug("Request Payload: " + credentialsJson);
+                string requestJson = JsonConvert.SerializeObject(tokenRequest);
+                LogDebug("Request Headers - username: " + _username);
+                LogDebug("Request Headers - password: " + _password);
+                LogDebug("Request Body: " + requestJson);
 
-                var content = new StringContent(
-                    credentialsJson,
+                request.Content = new StringContent(
+                    requestJson,
                     Encoding.UTF8,
                     "application/json"
                 );
 
-                // Build URL for v2 API
-                string url = (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/token/grant";
-                LogDebug("Token URL: " + url);
                 LogDebug("Making POST request to bKash...");
 
                 // Make request
                 HttpResponseMessage response = null;
                 try
                 {
-                    response = await _httpClient.PostAsync(url, content);
+                    response = await _httpClient.PostAsync(url, request.Content);
                     LogDebug("Response Status Code: " + response.StatusCode);
                 }
                 catch (HttpRequestException hexc)
@@ -161,16 +177,17 @@ namespace bKashPayment.Services
                     throw;
                 }
 
-                // Check if token received
+                // Check response status
                 if (result.statusCode != null && result.statusCode.ToString() != "0000")
                 {
                     throw new Exception("bKash returned error: " + result.statusMessage);
                 }
 
+                // Extract token - could be id_token or accessToken
                 string token = result.id_token ?? result.accessToken;
                 if (string.IsNullOrEmpty(token))
                 {
-                    LogDebug("Response JSON: " + responseString);
+                    LogDebug("Response JSON Keys: " + string.Join(", ", result.Properties.Select(p => p.Name)));
                     throw new Exception("No token in response. Check API response format.");
                 }
 
@@ -216,7 +233,7 @@ namespace bKashPayment.Services
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, 
-                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/create");
+                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized-checkout/create");
                 
                 request.Headers.Add("Authorization", accessToken);
                 request.Headers.Add("X-APP-Key", _appKey);
@@ -270,7 +287,7 @@ namespace bKashPayment.Services
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, 
-                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/payment/create");
+                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized-checkout/payment/create");
                 
                 request.Headers.Add("Authorization", accessToken);
                 request.Headers.Add("X-APP-Key", _appKey);
@@ -325,7 +342,7 @@ namespace bKashPayment.Services
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, 
-                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/payment/execute");
+                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized-checkout/payment/execute");
                 
                 request.Headers.Add("Authorization", accessToken);
                 request.Headers.Add("X-APP-Key", _appKey);
@@ -364,7 +381,7 @@ namespace bKashPayment.Services
             try
             {
                 var request = new HttpRequestMessage(HttpMethod.Post, 
-                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized/checkout/payment/query");
+                    (_baseUrl ?? "").TrimEnd('/') + "/tokenized-checkout/payment/query");
                 
                 request.Headers.Add("Authorization", accessToken);
                 request.Headers.Add("X-APP-Key", _appKey);
